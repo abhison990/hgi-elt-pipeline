@@ -1,19 +1,60 @@
-from airflow import DAG
-from airflow.providers.postgres.operators.postgres import PostgresOperator
-from airflow.operators.python import PythonOperator
-from datetime import datetime
+"""
+Airflow DAG for HGI Customer Support ELT Pipeline.
+
+This DAG performs the following steps:
+1. Creates required schemas.
+2. Loads raw CSV data into staging.
+3. Transforms and anonymizes PII fields.
+4. Builds mart aggregation table.
+5. Executes data quality checks.
+
+Schedule: Hourly
+Author: Abhijeet Sondkar
+"""
+
+import logging
+from datetime import datetime, timedelta
+
 import pandas as pd
 from sqlalchemy import create_engine
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+
+# ------------------------------------------------------------------------------
+# Default DAG configuration
+# ------------------------------------------------------------------------------
 
 default_args = {
     "owner": "hgi",
     "start_date": datetime(2024, 1, 1),
+    "retries": 2,
+    "retry_delay": timedelta(minutes=2),
 }
 
+# ------------------------------------------------------------------------------
+# Python task: Load CSV into staging
+# ------------------------------------------------------------------------------
 
-def load_csv():
+
+def load_csv() -> None:
+    """
+    Load raw CSV file into Postgres staging schema.
+
+    Reads the CSV from the Airflow-mounted data directory and writes
+    to staging.raw_customer_support table.
+
+    Raises:
+        Exception: If database write fails.
+    """
+    logging.info("Starting CSV ingestion task.")
+
     engine = create_engine("postgresql://hgi:hgi@postgres:5432/hgi")
+    logging.info("Database engine created.")
+
     df = pd.read_csv("/opt/airflow/data/raw/customer_support_tickets.csv")
+    logging.info("Read %d rows from CSV.", len(df))
 
     df.to_sql(
         "raw_customer_support",
@@ -23,20 +64,28 @@ def load_csv():
         index=False,
     )
 
+    logging.info("Data successfully written to staging.raw_customer_support.")
+
+
+# ------------------------------------------------------------------------------
+# DAG Definition
+# ------------------------------------------------------------------------------
+
 with DAG(
     dag_id="elt_pipeline",
-    schedule_interval="0 * * * *",  # hourly
+    schedule_interval="0 * * * *",
     catchup=False,
     default_args=default_args,
+    description="HGI ELT pipeline for customer support analytics",
 ) as dag:
 
     create_schemas = PostgresOperator(
         task_id="create_schemas",
         postgres_conn_id="hgi_postgres",
         sql="""
-              CREATE SCHEMA IF NOT EXISTS staging;
-              CREATE SCHEMA IF NOT EXISTS mart;
-          """
+            CREATE SCHEMA IF NOT EXISTS staging;
+            CREATE SCHEMA IF NOT EXISTS mart;
+        """,
     )
 
     load_task = PythonOperator(
