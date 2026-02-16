@@ -1,0 +1,39 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: hgi_postgres
+    environment:
+      POSTGRES_USER: hgi
+      POSTGRES_PASSWORD: hgi
+      POSTGRES_DB: hgi
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: hgi_metabase
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+
+  airflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: hgi_airflow
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+    command: >
+      bash -c "
+      airflow standalone
+      "
+
+volumes:
+  pgdata:
